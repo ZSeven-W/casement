@@ -1,6 +1,8 @@
 use std::cell::{Cell, RefCell};
 use std::mem;
+use std::path::PathBuf;
 use std::rc::Weak;
+use std::sync::Mutex;
 use std::time::Instant;
 
 use objc2::rc::Retained;
@@ -8,7 +10,48 @@ use objc2::{declare_class, msg_send_id, mutability, ClassType, DeclaredClass};
 use objc2_app_kit::{
     NSApplication, NSApplicationActivationPolicy, NSApplicationDelegate, NSRunningApplication,
 };
-use objc2_foundation::{MainThreadMarker, NSNotification, NSObject, NSObjectProtocol};
+use objc2_foundation::{
+    MainThreadMarker, NSArray, NSNotification, NSObject, NSObjectProtocol, NSURL,
+};
+
+/// Files macOS has asked the application to open via the Cocoa
+/// "Open Documents" Apple event (`application:openURLs:`) — i.e. a
+/// Finder double-click, `open file`, or a file dropped on the Dock
+/// icon. macOS delivers these out-of-band of process arguments, and
+/// they can arrive before any winit `Window` exists, so they are
+/// buffered here and drained by the app through
+/// [`crate::platform::macos::drain_opened_file_urls`].
+///
+/// This is a Winit fork addition (`ZSeven-W/winit`, branch
+/// `op-file-open`): upstream winit 0.30 exposes no app-level
+/// "files opened" event.
+static OPENED_FILES: Mutex<Vec<PathBuf>> = Mutex::new(Vec::new());
+
+/// Take and clear the buffered "open document" file paths.
+pub(crate) fn drain_opened_files() -> Vec<PathBuf> {
+    OPENED_FILES.lock().map(|mut files| std::mem::take(&mut *files)).unwrap_or_default()
+}
+
+/// Append the file URLs from an `application:openURLs:` event to the
+/// buffer. Non-`file://` URLs (custom URL schemes) carry no
+/// filesystem path and are skipped.
+fn buffer_opened_urls(urls: &NSArray<NSURL>) {
+    let Ok(mut files) = OPENED_FILES.lock() else {
+        return;
+    };
+    for i in 0..urls.count() {
+        // SAFETY: `i` is within `0..count`, and the objc2 `NSURL`
+        // getters carry no further safety preconditions.
+        unsafe {
+            let url = urls.objectAtIndex(i);
+            if url.isFileURL() {
+                if let Some(path) = url.path() {
+                    files.push(PathBuf::from(path.to_string()));
+                }
+            }
+        }
+    }
+}
 
 use super::event_handler::EventHandler;
 use super::event_loop::{notify_windows_of_exit, stop_app_immediately, ActiveEventLoop, PanicInfo};
@@ -69,6 +112,18 @@ declare_class!(
         #[method(applicationWillTerminate:)]
         fn app_will_terminate(&self, notification: &NSNotification) {
             self.will_terminate(notification)
+        }
+
+        // Winit fork addition (ZSeven-W/winit, branch op-file-open):
+        // capture the macOS "Open Documents" Apple event so a Finder
+        // double-click / `open file` reaches the application. Upstream
+        // winit 0.30 drops this event. The URLs are buffered (they can
+        // arrive before any window exists) and drained by the app via
+        // `crate::platform::macos::drain_opened_file_urls`.
+        #[method(application:openURLs:)]
+        fn app_open_urls(&self, _application: &NSApplication, urls: &NSArray<NSURL>) {
+            trace_scope!("application:openURLs:");
+            buffer_opened_urls(urls);
         }
     }
 );

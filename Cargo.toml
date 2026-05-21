@@ -1,14 +1,20 @@
 [package]
-name = "winit"
+# Renamed from `winit` so this fork is its own publishable crate.
+# The library name stays `winit` (see `[lib]` below), so dependents
+# still write `use winit::…` — only the package name differs. This
+# fork adds a macOS open-documents Apple-event hook
+# (`platform::macos::drain_opened_file_urls`) that upstream lacks.
+name = "casement"
 version = "0.30.13"
 authors = [
     "The winit contributors",
     "Pierre Krieger <pierre.krieger1708@gmail.com>",
+    "ZSeven-W <fini.yang@gmail.com>",
 ]
-description = "Cross-platform window creation library."
+description = "Cross-platform window creation library — a winit fork with a macOS open-documents Apple-event hook."
 keywords = ["windowing"]
 readme = "README.md"
-documentation = "https://docs.rs/winit"
+documentation = "https://docs.rs/casement"
 categories = ["gui"]
 rust-version.workspace = true
 repository.workspace = true
@@ -25,6 +31,11 @@ include = [
     "/src/platform_impl/web/script/**/*.min.js",
     "/tests",
 ]
+
+[lib]
+# Keep the library name `winit` so dependents import it unchanged;
+# only the crates.io package name (`casement`) differs.
+name = "winit"
 
 [package.metadata.docs.rs]
 features = [
@@ -102,7 +113,9 @@ tracing = { version = "0.1.40", default-features = false }
 image = { version = "0.25.0", default-features = false, features = ["png"] }
 tracing = { version = "0.1.40", default-features = false, features = ["log"] }
 tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
-winit = { path = ".", features = ["rwh_05"] }
+# Self dev-dependency (enables `rwh_05` for examples / tests). The
+# `package` key keeps the `winit` import name after the crate rename.
+winit = { path = ".", package = "casement", features = ["rwh_05"] }
 
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dev-dependencies]
 softbuffer = { version = "0.4.0", default-features = false, features = [

@@ -91,6 +91,36 @@ use crate::event_loop::{ActiveEventLoop, EventLoopBuilder};
 use crate::monitor::MonitorHandle;
 use crate::window::{Window, WindowAttributes};
 
+/// Take and clear the list of files macOS has asked the application
+/// to open since the last call.
+///
+/// On macOS, double-clicking a document in Finder, running `open
+/// some.file`, or dropping a file on the Dock icon delivers that
+/// file through the Cocoa `application:openURLs:` Apple event — not
+/// through process arguments (`std::env::args`). Winit buffers those
+/// file URLs as they arrive (which can be before any [`Window`]
+/// exists, e.g. on a launch triggered by Finder); call this to
+/// receive and clear them.
+///
+/// Recommended polling points:
+/// - [`ApplicationHandler::resumed`] — picks up the document(s) a
+///   Finder launch opened the app with.
+/// - [`ApplicationHandler::new_events`] — picks up documents opened
+///   while the application is already running.
+///
+/// Returns an empty `Vec` on a plain launch with no associated
+/// documents, and on every platform other than macOS this function
+/// is simply not available.
+///
+/// This is a fork addition (`ZSeven-W/winit`, branch
+/// `op-file-open`); upstream winit 0.30 exposes no equivalent.
+///
+/// [`ApplicationHandler::resumed`]: crate::application::ApplicationHandler::resumed
+/// [`ApplicationHandler::new_events`]: crate::application::ApplicationHandler::new_events
+pub fn drain_opened_file_urls() -> Vec<std::path::PathBuf> {
+    crate::platform_impl::drain_opened_files()
+}
+
 /// Additional methods on [`Window`] that are specific to MacOS.
 pub trait WindowExtMacOS {
     /// Returns whether or not the window is in simple fullscreen mode.
