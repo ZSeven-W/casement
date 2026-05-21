@@ -1,6 +1,19 @@
 # Auto detect text files and perform LF normalization
 * text=auto
 
+# Force LF in working tree for source files so `cargo fmt --check`
+# on the Windows CI runner does not trip on CRLF that the runner's
+# git would otherwise inject when `core.autocrlf` slips through
+# during the submodule checkout.
+*.rs        eol=lf
+*.toml      eol=lf
+*.md        eol=lf
+*.yml       eol=lf
+*.yaml      eol=lf
+*.sh        eol=lf
+*.lock      eol=lf
+*.cfg       eol=lf
+
 # Custom for Visual Studio
 *.cs     diff=csharp
 *.sln    merge=union
