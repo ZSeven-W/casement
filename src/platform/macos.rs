@@ -318,6 +318,11 @@ pub trait WindowAttributesExtMacOS {
     fn with_titlebar_hidden(self, titlebar_hidden: bool) -> Self;
     /// Hides the window titlebar buttons.
     fn with_titlebar_buttons_hidden(self, titlebar_buttons_hidden: bool) -> Self;
+    /// Pushes the traffic-light buttons down by `inset` points from
+    /// their default title-bar position, so an app with a taller
+    /// custom top bar can vertically centre them. `0.0` keeps the
+    /// standard placement.
+    fn with_traffic_light_inset(self, inset: f64) -> Self;
     /// Makes the window content appear behind the titlebar.
     fn with_fullsize_content_view(self, fullsize_content_view: bool) -> Self;
     fn with_disallow_hidpi(self, disallow_hidpi: bool) -> Self;
@@ -358,6 +363,12 @@ impl WindowAttributesExtMacOS for WindowAttributes {
     #[inline]
     fn with_titlebar_buttons_hidden(mut self, titlebar_buttons_hidden: bool) -> Self {
         self.platform_specific.titlebar_buttons_hidden = titlebar_buttons_hidden;
+        self
+    }
+
+    #[inline]
+    fn with_traffic_light_inset(mut self, inset: f64) -> Self {
+        self.platform_specific.traffic_light_inset = inset;
         self
     }
 

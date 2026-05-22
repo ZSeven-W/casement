@@ -49,6 +49,11 @@ pub struct PlatformSpecificWindowAttributes {
     pub title_hidden: bool,
     pub titlebar_hidden: bool,
     pub titlebar_buttons_hidden: bool,
+    /// Extra points to push the traffic-light buttons down from
+    /// their default title-bar position — lets an app with a
+    /// taller custom top bar vertically centre them. `0.0` keeps
+    /// the standard placement.
+    pub traffic_light_inset: f64,
     pub fullsize_content_view: bool,
     pub disallow_hidpi: bool,
     pub has_shadow: bool,
@@ -67,6 +72,7 @@ impl Default for PlatformSpecificWindowAttributes {
             title_hidden: false,
             titlebar_hidden: false,
             titlebar_buttons_hidden: false,
+            traffic_light_inset: 0.0,
             fullsize_content_view: false,
             disallow_hidpi: false,
             has_shadow: true,
@@ -123,6 +129,10 @@ pub(crate) struct State {
     is_simple_fullscreen: Cell<bool>,
     saved_style: Cell<Option<NSWindowStyleMask>>,
     is_borderless_game: Cell<bool>,
+    /// Points the traffic-light buttons are pushed down from their
+    /// default title-bar position. Re-applied after a fullscreen
+    /// exit, when macOS rebuilds the title bar at the default spot.
+    traffic_light_inset: Cell<f64>,
 }
 
 declare_class!(
@@ -305,6 +315,9 @@ declare_class!(
 
             self.restore_state_from_fullscreen();
             self.ivars().in_fullscreen_transition.set(false);
+            // macOS rebuilds the title bar at the default button
+            // position on exit — re-apply any traffic-light inset.
+            self.reposition_traffic_lights();
             if let Some(target_fullscreen) = self.ivars().target_fullscreen.take() {
                 self.set_fullscreen(target_fullscreen);
             }
@@ -613,6 +626,10 @@ fn new_window(
                 }
             }
         }
+        // Traffic-light repositioning happens once the delegate
+        // exists (see `reposition_traffic_lights`) so a fullscreen
+        // round-trip — which rebuilds the title bar — can re-apply
+        // it from `windowDidExitFullScreen`.
         if attrs.platform_specific.movable_by_window_background {
             window.setMovableByWindowBackground(true);
         }
@@ -735,8 +752,13 @@ impl WindowDelegate {
             is_simple_fullscreen: Cell::new(false),
             saved_style: Cell::new(None),
             is_borderless_game: Cell::new(attrs.platform_specific.borderless_game),
+            traffic_light_inset: Cell::new(attrs.platform_specific.traffic_light_inset),
         });
         let delegate: Retained<WindowDelegate> = unsafe { msg_send_id![super(delegate), init] };
+
+        // Now the delegate owns the inset value, push the
+        // traffic-light buttons into place.
+        delegate.reposition_traffic_lights();
 
         if scale_factor != 1.0 {
             let delegate = delegate.clone();
@@ -809,6 +831,35 @@ impl WindowDelegate {
     #[track_caller]
     pub(super) fn window(&self) -> &WinitWindow {
         &self.ivars().window
+    }
+
+    /// Push the traffic-light buttons down by the configured inset.
+    /// Idempotent per title-bar build: AppKit places the buttons at
+    /// their default spot on window creation and after a fullscreen
+    /// exit, and this offsets that default once. A `0.0` inset is a
+    /// no-op (standard placement).
+    pub(super) fn reposition_traffic_lights(&self) {
+        let inset = self.ivars().traffic_light_inset.get();
+        if inset == 0.0 {
+            return;
+        }
+        let window = self.window();
+        for button_kind in &[
+            NSWindowButton::NSWindowCloseButton,
+            NSWindowButton::NSWindowMiniaturizeButton,
+            NSWindowButton::NSWindowZoomButton,
+        ] {
+            if let Some(button) = window.standardWindowButton(*button_kind) {
+                // AppKit's y axis points up, so lowering `origin.y`
+                // moves the button down visually.
+                let mut frame = button.frame();
+                frame.origin.y -= inset;
+                // SAFETY: repositioning a standard window button is
+                // sound — the same `setFrame` AppKit exposes for any
+                // `NSView`.
+                unsafe { button.setFrame(frame) };
+            }
+        }
     }
 
     #[track_caller]
