@@ -133,6 +133,21 @@ pub(crate) struct State {
     /// default title-bar position. Re-applied after a fullscreen
     /// exit, when macOS rebuilds the title bar at the default spot.
     traffic_light_inset: Cell<f64>,
+    /// AppKit's default y for the standard window buttons, captured
+    /// on the first `reposition_traffic_lights` call before any
+    /// offset is applied. Subsequent calls re-apply the inset
+    /// against this baseline (absolute placement) so a repeated
+    /// call — e.g. one per `windowDidResize` tick during a live
+    /// drag — doesn't accumulate the inset and drift the buttons.
+    traffic_light_baseline_y: Cell<Option<f64>>,
+    /// Last y `reposition_traffic_lights` wrote into the button
+    /// frames. Used as a poison-check when the baseline gets
+    /// re-captured after a fullscreen exit: if the freshly-sampled
+    /// y matches this value, AppKit hasn't reset to its default
+    /// yet (we're seeing our own offset bleeding through), so the
+    /// recapture derives `baseline = current + inset` instead of
+    /// trusting the offset value as the new default.
+    traffic_light_last_applied_y: Cell<Option<f64>>,
 }
 
 declare_class!(
@@ -175,6 +190,11 @@ declare_class!(
             trace_scope!("windowDidResize:");
             // NOTE: WindowEvent::Resized is reported in frameDidChange.
             self.emit_move_event();
+            // The transparent / fullsize-content title bar lets the
+            // native traffic lights drift on resize — re-pin them to
+            // the requested inset so they stay anchored to the
+            // window's top-left corner.
+            self.reposition_traffic_lights();
         }
 
         #[method(windowWillStartLiveResize:)]
@@ -316,7 +336,12 @@ declare_class!(
             self.restore_state_from_fullscreen();
             self.ivars().in_fullscreen_transition.set(false);
             // macOS rebuilds the title bar at the default button
-            // position on exit — re-apply any traffic-light inset.
+            // position on exit — that default `y` may not match the
+            // one captured at window init (the title-bar metrics can
+            // change across the fullscreen transition). Drop the
+            // stored baseline so `reposition_traffic_lights` samples
+            // the fresh AppKit default before re-applying the inset.
+            self.ivars().traffic_light_baseline_y.set(None);
             self.reposition_traffic_lights();
             if let Some(target_fullscreen) = self.ivars().target_fullscreen.take() {
                 self.set_fullscreen(target_fullscreen);
@@ -753,6 +778,8 @@ impl WindowDelegate {
             saved_style: Cell::new(None),
             is_borderless_game: Cell::new(attrs.platform_specific.borderless_game),
             traffic_light_inset: Cell::new(attrs.platform_specific.traffic_light_inset),
+            traffic_light_baseline_y: Cell::new(None),
+            traffic_light_last_applied_y: Cell::new(None),
         });
         let delegate: Retained<WindowDelegate> = unsafe { msg_send_id![super(delegate), init] };
 
@@ -833,27 +860,60 @@ impl WindowDelegate {
         &self.ivars().window
     }
 
-    /// Push the traffic-light buttons down by the configured inset.
-    /// Idempotent per title-bar build: AppKit places the buttons at
-    /// their default spot on window creation and after a fullscreen
-    /// exit, and this offsets that default once. A `0.0` inset is a
-    /// no-op (standard placement).
+    /// Pin the traffic-light buttons `inset` points below AppKit's
+    /// default title-bar position. **Absolute** placement: the
+    /// first call (and any call after the baseline is invalidated)
+    /// captures the AppKit baseline `y`; every subsequent call
+    /// writes `frame.y = baseline - inset`. That makes the method
+    /// idempotent — safe to call on every `windowDidResize` tick
+    /// during a live drag, after a fullscreen exit, etc.
+    ///
+    /// Poison guard: if the captured y matches our own last
+    /// applied y (AppKit hasn't reset the buttons to default yet —
+    /// e.g. when `windowDidExitFullScreen` fires before the title
+    /// bar has fully rebuilt), the baseline is derived as
+    /// `current + inset` instead of trusting the offset value as
+    /// the new default. A `0.0` inset is a no-op.
     pub(super) fn reposition_traffic_lights(&self) {
         let inset = self.ivars().traffic_light_inset.get();
         if inset == 0.0 {
             return;
         }
         let window = self.window();
+        let last_applied = self.ivars().traffic_light_last_applied_y.get();
         for button_kind in &[
             NSWindowButton::NSWindowCloseButton,
             NSWindowButton::NSWindowMiniaturizeButton,
             NSWindowButton::NSWindowZoomButton,
         ] {
             if let Some(button) = window.standardWindowButton(*button_kind) {
+                let mut frame = button.frame();
+                // Capture the AppKit default once (and again after
+                // a deliberate invalidation, e.g. fullscreen exit).
+                // All three standard buttons share a y, so a single
+                // baseline is enough.
+                let baseline = match self.ivars().traffic_light_baseline_y.get() {
+                    Some(b) => b,
+                    None => {
+                        let candidate = frame.origin.y;
+                        // Poison guard: a freshly-sampled y that
+                        // matches our own last applied y means
+                        // AppKit hasn't reset yet — infer the
+                        // baseline as `candidate + inset` instead
+                        // of trusting the offset value.
+                        let captured = match last_applied {
+                            Some(applied) if (candidate - applied).abs() < 0.5 => candidate + inset,
+                            _ => candidate,
+                        };
+                        self.ivars().traffic_light_baseline_y.set(Some(captured));
+                        captured
+                    },
+                };
                 // AppKit's y axis points up, so lowering `origin.y`
                 // moves the button down visually.
-                let mut frame = button.frame();
-                frame.origin.y -= inset;
+                let target = baseline - inset;
+                frame.origin.y = target;
+                self.ivars().traffic_light_last_applied_y.set(Some(target));
                 // SAFETY: repositioning a standard window button is
                 // sound — the same `setFrame` AppKit exposes for any
                 // `NSView`.
