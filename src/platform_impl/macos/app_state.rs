@@ -161,7 +161,13 @@ impl ApplicationDelegate {
     // `EventLoop`s the user creates.
     fn did_finish_launching(&self, _notification: &NSNotification) {
         trace_scope!("applicationDidFinishLaunching:");
-        self.ivars().is_launched.set(true);
+        self.finish_launching();
+    }
+
+    pub fn finish_launching(&self) {
+        if self.ivars().is_launched.replace(true) {
+            return;
+        }
 
         let mtm = MainThreadMarker::from(self);
         let app = NSApplication::sharedApplication(mtm);
@@ -201,6 +207,7 @@ impl ApplicationDelegate {
 
         self.set_is_running(true);
         self.dispatch_init_events();
+        window_activation_hack(&app);
 
         // If the application is being launched via `EventLoop::pump_app_events()` then we'll
         // want to stop the app once it is launched (and return to the external loop)

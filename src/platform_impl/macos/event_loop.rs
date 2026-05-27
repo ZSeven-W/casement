@@ -293,6 +293,15 @@ impl<T> EventLoop<T> {
                     debug_assert!(!self.delegate.is_running());
                     self.delegate.set_is_running(true);
                     self.delegate.dispatch_init_events();
+                } else {
+                    // `-[NSApplication run]` normally calls this before
+                    // entering the event loop. On recent macOS launches
+                    // through a hand-rolled Rust main can already have
+                    // created `NSApplication` before winit's delegate sees
+                    // the finish-launching notification, leaving the app
+                    // running without ever dispatching `Resumed`.
+                    unsafe { self.app.finishLaunching() };
+                    self.delegate.finish_launching();
                 }
 
                 // SAFETY: We do not run the application re-entrantly
