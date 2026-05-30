@@ -240,6 +240,13 @@ declare_class!(
             // TODO: center the cursor if the window had mouse grab when it
             // lost focus
             self.queue_event(WindowEvent::Focused(true));
+            // Apply the traffic-light inset now that the window is shown.
+            // The setup-time call (in `new`) runs before AppKit has
+            // created the standard window buttons, so it's a no-op and
+            // the inset only took effect after a later resize. Becoming
+            // key fires right after the window first appears, with the
+            // buttons present, so the inset lands on launch.
+            self.reposition_traffic_lights();
         }
 
         #[method(windowDidResignKey:)]
