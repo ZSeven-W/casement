@@ -203,6 +203,21 @@ impl MonitorHandle {
     }
 
     #[inline]
+    pub fn work_area(&self) -> Option<(PhysicalPosition<i32>, PhysicalSize<u32>)> {
+        let work_area = get_monitor_info(self.0).ok()?.monitorInfo.rcWork;
+        let width = u32::try_from(work_area.right.checked_sub(work_area.left)?)
+            .ok()
+            .filter(|width| *width > 0)?;
+        let height = u32::try_from(work_area.bottom.checked_sub(work_area.top)?)
+            .ok()
+            .filter(|height| *height > 0)?;
+        Some((
+            PhysicalPosition { x: work_area.left, y: work_area.top },
+            PhysicalSize { width, height },
+        ))
+    }
+
+    #[inline]
     pub fn scale_factor(&self) -> f64 {
         dpi_to_scale_factor(get_monitor_dpi(self.0).unwrap_or(96))
     }

@@ -6,7 +6,7 @@ use std::borrow::Borrow;
 use std::ffi::c_void;
 use std::path::Path;
 
-use crate::dpi::PhysicalSize;
+use crate::dpi::{PhysicalPosition, PhysicalSize};
 use crate::event::DeviceId;
 use crate::event_loop::EventLoopBuilder;
 use crate::monitor::MonitorHandle;
@@ -628,6 +628,12 @@ pub trait MonitorHandleExtWindows {
     /// Returns the name of the monitor adapter specific to the Win32 API.
     fn native_id(&self) -> String;
 
+    /// Returns the monitor's usable desktop area in physical coordinates.
+    ///
+    /// Returns `None` when Windows can no longer query the monitor or reports
+    /// an empty or otherwise invalid work area.
+    fn work_area(&self) -> Option<(PhysicalPosition<i32>, PhysicalSize<u32>)>;
+
     /// Returns the handle of the monitor - `HMONITOR`.
     fn hmonitor(&self) -> HMONITOR;
 }
@@ -636,6 +642,11 @@ impl MonitorHandleExtWindows for MonitorHandle {
     #[inline]
     fn native_id(&self) -> String {
         self.inner.native_identifier()
+    }
+
+    #[inline]
+    fn work_area(&self) -> Option<(PhysicalPosition<i32>, PhysicalSize<u32>)> {
+        self.inner.work_area()
     }
 
     #[inline]
