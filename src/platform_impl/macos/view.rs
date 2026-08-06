@@ -131,6 +131,12 @@ pub struct ViewState {
     /// to the application, even during IME
     forward_key_to_app: Cell<bool>,
 
+    /// `characters` of the key event currently being interpreted, or
+    /// `None` outside `interpretKeyEvents`. `insertText:` cannot reach
+    /// the `NSEvent` itself but needs it to tell an IME transformation
+    /// from ordinary typing — see `ime_commit::is_ime_commit`.
+    key_characters: RefCell<Option<String>>,
+
     marked_text: RefCell<Retained<NSMutableAttributedString>>,
     accepts_first_mouse: bool,
 
@@ -405,10 +411,14 @@ declare_class!(
                 unsafe { &*string }.to_string()
             };
 
-            let is_control = string.chars().next().is_some_and(|c| c.is_control());
-
-            // Commit only if we have marked text.
-            if unsafe { self.hasMarkedText() } && self.is_ime_enabled() && !is_control {
+            // Commit if a composition is open, or if the IME resolved the
+            // key outright without ever opening one (CJK punctuation).
+            if crate::platform_impl::macos::ime_commit::is_ime_commit(
+                self.is_ime_enabled(),
+                unsafe { self.hasMarkedText() },
+                &string,
+                self.ivars().key_characters.borrow().as_deref(),
+            ) {
                 self.queue_event(WindowEvent::Ime(Ime::Preedit(String::new(), None)));
                 self.queue_event(WindowEvent::Ime(Ime::Commit(string)));
                 self.ivars().ime_state.set(ImeState::Committed);
@@ -464,8 +474,14 @@ declare_class!(
             // `doCommandBySelector`. (doCommandBySelector means that the keyboard input
             // is not handled by IME and should be handled by the application)
             if self.ivars().ime_allowed.get() {
+                // Publish the key's own characters for the duration of the
+                // interpretation: `insertText:` compares against them to
+                // tell an IME transformation from ordinary typing.
+                *self.ivars().key_characters.borrow_mut() =
+                    unsafe { event.characters() }.map(|characters| characters.to_string());
                 let events_for_nsview = NSArray::from_slice(&[&*event]);
                 unsafe { self.interpretKeyEvents(&events_for_nsview) };
+                *self.ivars().key_characters.borrow_mut() = None;
 
                 // If the text was committed we must treat the next keyboard event as IME related.
                 if self.ivars().ime_state.get() == ImeState::Committed {
@@ -803,6 +819,7 @@ impl WinitView {
             input_source: Default::default(),
             ime_allowed: Default::default(),
             forward_key_to_app: Default::default(),
+            key_characters: Default::default(),
             marked_text: Default::default(),
             accepts_first_mouse,
             _ns_window: WeakId::new(&window.retain()),

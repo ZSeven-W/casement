@@ -8,6 +8,7 @@ mod event;
 mod event_handler;
 mod event_loop;
 mod ffi;
+mod ime_commit;
 mod menu;
 mod monitor;
 mod observer;
